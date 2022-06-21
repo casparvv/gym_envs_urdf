@@ -2,6 +2,9 @@ from urdfenvs.point_robot_urdf.envs.point_robot_env import PointRobotEnv
 
 
 class PointRobotVelEnv(PointRobotEnv):
+    def __init__(self):
+        super().__init__()
+
     def apply_action(self, action):
         self._robot.apply_velocity_action(action)
 
