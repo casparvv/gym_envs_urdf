@@ -423,6 +423,49 @@ class UrdfEnv(gym.Env):
         cur_dict = dict(self.observation_space.spaces)
         cur_dict[sensor.name()] = sensor.get_observation_space()
         self.observation_space = gym.spaces.Dict(cur_dict)
+        
+    def show_lidar(self, sensor_data, q, body_ids_old, number_lidar_rays) -> np.ndarray:
+        """Shows LiDAR rays in the simulation environment.
+        Parameters
+        ----------
+        
+        sensor_data: Configuration space positions of LiDAR rays, relative to the robot.
+        q: Configuration space state of the robot.
+        body_ids_old: The ids of the previously added ray visualizations, used to remove old ones.
+        number_lidar_rays: The total number of rays the LiDAR uses.
+        
+        Returns
+        ----------
+        
+        body_ids: The new ray visualization ids.
+        """
+        # Remove previously added ray visualizations.
+        if body_ids_old is not None:
+            # body_ids_old is None before creating the first visualizations.
+            for body_id_old in body_ids_old:
+                p.removeBody(int(body_id_old))
+        body_ids = np.zeros(number_lidar_rays)
+        # Reshape and add z-values to the sensor data.
+        q_obs = sensor_data.reshape(number_lidar_rays, 2)
+        q_obs = np.append(q_obs, np.zeros((number_lidar_rays, 1)), axis = 1)
+        # Calculate length and angles of rays.
+        xs = np.linalg.norm(q_obs, axis=1)
+        angles = np.arange(number_lidar_rays)/number_lidar_rays*2*np.pi
+        for n in range(number_lidar_rays):
+            # Create a cylinder visual shape for each ray.
+            shape_id = p.createVisualShape(
+                p.GEOM_CYLINDER, radius=0.02, length=xs[n], rgbaColor=[1,0,0,0.6]
+            )
+            # Create a Pybullet visualization for each ray using the visual shape.
+            body_id = p.createMultiBody(
+                baseMass=0,
+                baseCollisionShapeIndex=-1,
+                baseVisualShapeIndex=shape_id,
+                basePosition=q + np.divide(q_obs[n], 2) + [0, 0, 0.1],
+                baseOrientation=p.getQuaternionFromEuler([np.pi/2, 0, np.pi/2 + angles[n]]),
+                )
+            body_ids[n] = int(body_id)
+        return body_ids
 
     def check_initial_state(self, pos: np.ndarray, vel: np.ndarray) -> tuple:
         """Filters initial state of the robot and returns a valid state."""
