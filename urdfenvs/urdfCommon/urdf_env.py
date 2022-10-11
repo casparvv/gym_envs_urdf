@@ -425,7 +425,15 @@ class UrdfEnv(gym.Env):
         self.observation_space = gym.spaces.Dict(cur_dict)
         
     def show_lidar(self, sensor_data, q, body_ids_old, number_lidar_rays) -> np.ndarray:
-        """Shows LiDAR rays in the simulation environment.
+        """Shows LiDAR rays/obstacles in the simulation environment.
+        Use obs_type to either plot the rays, the obstacles created at the end of the rays
+         or both to visualize both the rays and obstacles.
+
+        Below is the function show_lidar_spheres, which only shows the spheres at the end of the rays. 
+         The spheres only function is faster than this one.
+        To do: find a way to also update the positions and shapes of the rays since the current implementation is too slow. 
+         However, this seems not possible due to the visualShape length changing, this one is not 'updateable'.
+        
         Parameters
         ----------
         
@@ -439,32 +447,103 @@ class UrdfEnv(gym.Env):
         
         body_ids: The new ray visualization ids.
         """
-        # Remove previously added ray visualizations.
+        obs_type = "both" # ray, obs or both
+        # Remove previously added ray/obstacle visualizations.
         if body_ids_old is not None:
             # body_ids_old is None before creating the first visualizations.
             for body_id_old in body_ids_old:
                 p.removeBody(int(body_id_old))
         body_ids = np.zeros(number_lidar_rays)
+        if obs_type == "both":
+            body_ids = np.zeros(number_lidar_rays*2)
         # Reshape and add z-values to the sensor data.
         q_obs = sensor_data.reshape(number_lidar_rays, 2)
         q_obs = np.append(q_obs, np.zeros((number_lidar_rays, 1)), axis = 1)
-        # Calculate length and angles of rays.
-        xs = np.linalg.norm(q_obs, axis=1)
+        # Calculate the angles of the rays/obstacles.
         angles = np.arange(number_lidar_rays)/number_lidar_rays*2*np.pi
-        for n in range(number_lidar_rays):
-            # Create a cylinder visual shape for each ray.
-            shape_id = p.createVisualShape(
-                p.GEOM_CYLINDER, radius=0.02, length=xs[n], rgbaColor=[1,0,0,0.6]
+        if obs_type == "ray" or obs_type == "both":
+            # Calculate the length of the ray cylinders.
+            xs = np.linalg.norm(q_obs, axis=1)
+        if obs_type == "obs" or obs_type == "both":
+            # Create a sphere visual shape for every obstacle at the end of the rays.
+            shape_id_sphere = p.createVisualShape(
+                p.GEOM_SPHERE, radius=0.1, rgbaColor=[0.9,0.3,0,0.8]
             )
-            # Create a Pybullet visualization for each ray using the visual shape.
-            body_id = p.createMultiBody(
-                baseMass=0,
-                baseCollisionShapeIndex=-1,
-                baseVisualShapeIndex=shape_id,
-                basePosition=q + np.divide(q_obs[n], 2) + [0, 0, 0.1],
-                baseOrientation=p.getQuaternionFromEuler([np.pi/2, 0, np.pi/2 + angles[n]]),
+        for n in range(number_lidar_rays):
+            if obs_type == "ray" or obs_type == "both":
+                # Create a cylinder visual shape for each ray.
+                shape_id_ray = p.createVisualShape(
+                    p.GEOM_CYLINDER, radius=0.02, length=xs[n], rgbaColor=[0.9,0,0.1,0.8]
                 )
-            body_ids[n] = int(body_id)
+                # Create a Pybullet visualization for each ray using the visual shape.
+                body_id_ray = p.createMultiBody(
+                    baseMass=0,
+                    baseCollisionShapeIndex=-1,
+                    baseVisualShapeIndex=shape_id_ray,
+                    basePosition=q + np.divide(q_obs[n], 2) + [0, 0, 0.1],
+                    baseOrientation=p.getQuaternionFromEuler([np.pi/2, 0, np.pi/2 + angles[n]]),
+                    )
+                body_ids[n] = int(body_id_ray)
+            
+            if obs_type == "obs" or obs_type == "both":
+                # Create a Pybullet visualization for each sphere using the visual shape.
+                body_id_sphere = p.createMultiBody(
+                    baseMass=0,
+                    baseCollisionShapeIndex=-1,
+                    baseVisualShapeIndex=shape_id_sphere,
+                    basePosition=q + q_obs[n] + [0, 0, 0.1],
+                    baseOrientation=p.getQuaternionFromEuler([np.pi/2, 0, np.pi/2 + angles[n]]),
+                    )
+                if obs_type == "both":
+                    body_ids[number_lidar_rays + n] = int(body_id_sphere)
+                else:
+                    body_ids[n] = int(body_id_sphere)
+        return body_ids
+    
+    def show_lidar_spheres(self, sensor_data, q, body_ids_old, number_lidar_rays) -> np.ndarray:
+        """Shows sphere obstacles at the end of LiDAR rays in the simulation environment.
+
+        Parameters
+        ----------
+        
+        sensor_data: Configuration space positions of LiDAR rays, relative to the robot.
+        q: Configuration space state of the robot.
+        body_ids_old: The ids of the previously added ray visualizations.
+        number_lidar_rays: The total number of rays the LiDAR uses.
+        
+        Returns
+        ----------
+        
+        body_ids: The new ray visualization ids.
+        """
+        if body_ids_old is None:
+            body_ids = np.zeros(number_lidar_rays)
+            # Create a sphere visual shape for every obstacle at the end of the rays.
+            shape_id_sphere = p.createVisualShape(
+                p.GEOM_SPHERE, radius=0.1, rgbaColor=[0.9,0.3,0,0.8]
+            )
+        # Reshape and add z-values to the sensor data.
+        q_obs = sensor_data.reshape(number_lidar_rays, 2)
+        q_obs = np.append(q_obs, np.zeros((number_lidar_rays, 1)), axis = 1)
+        # Calculate the angles of the rays/obstacles.
+        angles = np.arange(number_lidar_rays)/number_lidar_rays*2*np.pi 
+        if body_ids_old is None:
+            # The visualizations are created at the first time this function is executed.
+            for n in range(number_lidar_rays):
+                # Create a Pybullet visualization for each sphere using the visual shape.
+                body_id_sphere = p.createMultiBody(
+                    baseMass=0,
+                    baseCollisionShapeIndex=-1,
+                    baseVisualShapeIndex=shape_id_sphere,
+                    basePosition=q + q_obs[n] + [0, 0, 0.1],
+                    baseOrientation=p.getQuaternionFromEuler([np.pi/2, 0, np.pi/2 + angles[n]]),
+                    )
+                body_ids[n] = int(body_id_sphere)
+        else:
+            # The visualizations are updated after the first time the function is executed, improving the speed over the show_lidar function.
+            body_ids = body_ids_old
+            for n in range(number_lidar_rays):
+                p.resetBasePositionAndOrientation(int(body_ids[n]), q + q_obs[n] + [0, 0, 0.1], p.getQuaternionFromEuler([np.pi/2, 0, np.pi/2 + angles[n]]))
         return body_ids
 
     def check_initial_state(self, pos: np.ndarray, vel: np.ndarray) -> tuple:
